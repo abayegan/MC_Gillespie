@@ -38,5 +38,5 @@ bool *canBasePair(char *);
 int length(int *);
 void printUsage(char * );
 void printHelp(char *);
-
+char* getExecPath(char*);
 #endif

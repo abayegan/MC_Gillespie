@@ -20,6 +20,7 @@ float fold(const char *, char *);
 char *initialEmptySecStr(char *);
 int canAddBasePair(int, int, int, int *);
 void listOfNextStatesByAddingBasePair(char *, char *, int *,int **);
+void listOfNextStatesByAddingCompatibleBasePair(char *, char *, int *,int **);
 struct stateConfig monteCarlo(char *);
 void nextConfig(char *, struct stateConfig *, int *);
 int run(char *, int);
@@ -52,13 +53,15 @@ int trjLength=-1;  /* number of Monte Carlo steps, -1 indicates stop at the MFE 
 bool *BP;       // BP[i*n+j]=0 or 1 if (i,j) is potential base pair 
 FILE *timeFile; // file var for output file of folding times
 float minE,RT= 0.00198717 * 310.15;     // minimum free energy returned by Vienna fold() 
-const char turner99_eng[] = "./param_files/rna_turner1999.par"; //path of the Turner 99 energy parameter file
-const char turner04_eng[] = "./param_files/rna_turner2004.par";
+char turner99[100] = "/param_files/rna_turner1999.par";
+char turner04[100] = "/param_files/rna_turner2004.par";
+char andronescu07[100] = "/param_files/rna_andronescu2007.par";
 char method[]="gil",engModel[] = "04"; // time-driven MC, event drive MC or Gillespie algorithms
 int trjLength, seed, numRun=1, synchronized=0, verbose=0;
 double MFE; /*minimum free energy of the input sequence*/
 char * mfeSS; /*minimum free energy structure of the input sequence*/
-
+char * targetStr = NULL; /*target structure to stop the trajectories*/
+int GO = 0;
 void printUsage(char *name){
 	printf("\nUSAGE: %s [-s sequence]|[-f FastaFile] [-m method] [-y random seed] [-r number of runs] [-l trajectory length] [-d 0|1|2] [-t temperature(c)] [-e 99|04] [-o output file prefix ] [-v]\ntry %s -h for help\n\n",name, name);
 	exit(1);
@@ -75,9 +78,9 @@ void printHelp(char *name){
 	"-l : define the number of states after which trajectory stops. The default is stopping at the MFE structure\n"\
 	"-d : set the dangles to be 0,1 or 2 to compute the energy of each structures\n"\
 	"-t : set the temprature (C) to compute the energy of structures\n"\
-	"-e : set the energy model to be Turner 99 or Turner 2004 by entering 99 or 04 respectively\n"\
+	"-e : set the energy model to be Turner 99, Turner 2004 or Andronescu 2007  by entering 99|04|07 respectively\n"\
 	"-o : set the output folder prefix name to save the mean first passage times. The default prefix is 'rna'. The prefix will be followed by '_firstPassageTimes'\n"\
-	"-v : print the trajectory on the output. Save the printed output if you need the trajectories\n");
+	"-v : print the trajectory on the output. Save the printed output if you need the trajectories. The output fields are (1)the state,(2)energy of state, (3)time stayed in the state, (4)number of neighbors of the state\n");
 	exit(1);
 }
 
@@ -141,6 +144,27 @@ void listOfNextStatesByAddingBasePair(char *rna, char *secStr, int *bps,
   }
   (*basePairsWhichCanBeAdded)[2*k] = -1;
 }
+/* Only base pairs that are present in the target structure can be added (analogous to GO model of folding for proteins)*/
+void listOfNextStatesByAddingCompatibleBasePair(char *rna, char *secStr, int *bps, 
+				      int **basePairsWhichCanBeAdded) {
+  int i,j,k = 0;
+  int n = strlen(rna);
+
+  for (i=0;i<n-1-THRESHOLD;i++) {/* leave room for j */
+    if (secStr[i]=='.') 
+      for (j=i+THRESHOLD+1;j<n;j++) {
+	if (secStr[j]=='.') {
+	  if (BP[i*n+j] && canAddBasePair(i,j,n,bps) && targetStr[i]=='(' && targetStr[j]==')') {
+	    (*basePairsWhichCanBeAdded)[2*k]   = i;
+	    (*basePairsWhichCanBeAdded)[2*k+1] = j;
+	    k++;
+	  } 
+	}
+      }
+  }
+  (*basePairsWhichCanBeAdded)[2*k] = -1;
+}
+
 	/* 
 	* Returns time increment to move to next state. Additionally,
 	* update secStr and bps to next configuration by roulette wheel.
@@ -280,7 +304,7 @@ void nextConfig(char *rna, struct stateConfig * config, int *bpsa){
 		else
 			printf("There is something wrong, bps too short?\n");
 	}
-	if (!strcmp(config->secStr,mfeSS)) //update the number of times passing the MFE structure
+	if (!strcmp(config->secStr,targetStr)) //update the number of times passing the target structure
 		config->folded += 1 ;
 	config->num      += 1; 
 	if (DEBUG) {
@@ -291,8 +315,6 @@ void nextConfig(char *rna, struct stateConfig * config, int *bpsa){
 	free(tmp); free(Pa); free(Pr);
 	//inline function for  -1.0/flux*log(drand48());
 }
-
-
 
 struct stateConfig monteCarlo(char *rna) {
 	int ma,mr,n = strlen(rna);
@@ -305,9 +327,9 @@ struct stateConfig monteCarlo(char *rna) {
 	out.MFE		    = 0;
 	out.bps         = (int *) xcalloc(n+1,sizeof(int));
 	out.bps[0]      = -1;
-	out.folded      = 0; //MFE str is not yet found
+	out.folded      = 0; //target str is not yet found
 	
-	if(!strcmp(out.secStr,mfeSS)){
+	if(!strcmp(out.secStr,targetStr)){
 		printf("No trajectory found! target structure is the empty structure!\n");
 		exit(0);
 	}
@@ -315,16 +337,26 @@ struct stateConfig monteCarlo(char *rna) {
 	
 	while (out.num < trjLength && trjLength!=-1 ) // when trajectory length is given get the path of length trjLength. good for getting long trajectories
 	{
-		listOfNextStatesByAddingBasePair(rna, out.secStr,out.bps, &bpsa);
+		if (GO)
+			listOfNextStatesByAddingCompatibleBasePair(rna, out.secStr,out.bps, &bpsa);
+		else
+			listOfNextStatesByAddingBasePair(rna, out.secStr,out.bps, &bpsa);
 		nextConfig(rna,&out,bpsa);	
 	}
-	while (strcmp(out.secStr,mfeSS) && trjLength==-1 ) //stop at the MFE structure when trajectory length is not given
+	while (strcmp(out.secStr,targetStr) && trjLength==-1 ) //stop at the target structure when trajectory length is not given
 	{
-		listOfNextStatesByAddingBasePair(rna, out.secStr,out.bps, &bpsa);
+		if (GO)
+			listOfNextStatesByAddingCompatibleBasePair(rna, out.secStr,out.bps, &bpsa);
+		else
+			listOfNextStatesByAddingBasePair(rna, out.secStr,out.bps, &bpsa);
 		nextConfig(rna,&out,bpsa);
 	}
 	
-	if(!strcmp(out.secStr,mfeSS)){
+	if(!strcmp(out.secStr,targetStr)){
+		if (GO)
+			listOfNextStatesByAddingCompatibleBasePair(rna, out.secStr,out.bps, &bpsa);
+		else
+			listOfNextStatesByAddingBasePair(rna, out.secStr,out.bps, &bpsa);
 		int ma = length(bpsa); 
 		int mr = length(out.bps);
 		if(verbose) printf("%s\t%lf\t%lf\t%d\n",out.secStr,out.MFE,0.0,ma+mr);
@@ -346,8 +378,10 @@ int run(char *rna, int NUMRUNS) {
 	
 	mfeSS = (char*) xcalloc(strlen(rna)+1,sizeof(char));
 	minE = fold(rna,mfeSS);
-	printf("MFE: %g\t%s\n",minE,mfeSS);
-	
+	printf("#MFE: %g\t%s\n",minE,mfeSS);
+	if (targetStr==NULL)
+		targetStr = mfeSS;
+	printf("#Target structure: %s\n",targetStr);
 	/* use time in seconds to set seed */
 	gettimeofday(&t, NULL);
 	if (synchronized)
@@ -357,7 +391,7 @@ int run(char *rna, int NUMRUNS) {
 
 	n = strlen(rna);
 	
-	printf("THRESHOLD = %u, TEMP = %g\n",THRESHOLD,temperature+273.15);
+	printf("#THRESHOLD = %u, TEMP = %g\n",THRESHOLD,temperature+273.15);
 	
 	for (i=0;i<NUMRUNS;i++) {
 		printf("# trajectory %d\n",i+1);
@@ -396,6 +430,13 @@ int main(int argc, char *argv[]) {
 							rna = argv[i+1];
 						else{
 							printf("\nerror in the input sequence");
+							printUsage(argv[0]);
+						}break;
+					case 'c':   //target structure
+						if(i+1<argc && argv[i+1][0]!='-')
+							targetStr = argv[i+1];
+						else{
+							printf("\nerror in the input target structure");
 							printUsage(argv[0]);
 						}break;
 					case 'f':  //fasta file
@@ -466,6 +507,9 @@ int main(int argc, char *argv[]) {
 							printf("\nerror in output prefix");
 							printUsage(argv[0]);
 						}break;
+					case 'g': //GO model
+						GO = 1;
+						break;
 					case 'v': //print trajectory
 						verbose = 1;
 						break;
@@ -496,10 +540,24 @@ int main(int argc, char *argv[]) {
 		timeFile = fopen(outFileName,"w");
 		fprintf(timeFile,"#seq:%s\tlength:%u\t",rna,(unsigned)strlen(rna));
 	}
+	if (targetStr!=NULL){
+		if (strlen(rna) != strlen(targetStr)){
+			printf("Sequence and the target structure must have the same length!\n");
+			exit(1);
+			}
+		}
+	//read the energy parameter file
+	char * execPath = getExecPath(argv[0]);
 	if (!strcmp(engModel,"99")) //use turner99 energy model
-		read_parameter_file(turner99_eng); 	
+		strcat(execPath,turner99); 	
 	else if (!strcmp(engModel,"04"))
-		read_parameter_file(turner04_eng); 	
+		strcat(execPath , turner04);
+	else if (!strcmp(engModel,"07"))
+		strcat(execPath , andronescu07);
+	else
+		printUsage(argv[0]);
+	read_parameter_file(execPath);
+	
 	run(rna, numRun);
 	
 	if (DEBUG) printf("native run done\n");
