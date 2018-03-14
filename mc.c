@@ -47,7 +47,6 @@ inline double sampleExpDist(double mean){
 /* Defined constants */
 #define MIN(x,y) ((x)<(y)?x:y)
 #define ABS(x) ((x)>=0?(x):-(x))
-
 /* Global variables */
 int trjLength=-1;  /* number of Monte Carlo steps, -1 indicates stop at the MFE regardless of the number of steps */
 bool *BP;       // BP[i*n+j]=0 or 1 if (i,j) is potential base pair 
@@ -57,7 +56,7 @@ char turner99[100] = "/param_files/rna_turner1999.par";
 char turner04[100] = "/param_files/rna_turner2004.par";
 char andronescu07[100] = "/param_files/rna_andronescu2007.par";
 char method[]="gil",engModel[] = "04"; // time-driven MC, event drive MC or Gillespie algorithms
-int trjLength, seed, numRun=1, synchronized=0, verbose=0;
+int trjLength, seed, numRun=1, synchronized=0, verbose=0, hasting=0;
 double MFE; /*minimum free energy of the input sequence*/
 char * mfeSS; /*minimum free energy structure of the input sequence*/
 char * targetStr = NULL; /*target structure to stop the trajectories*/
@@ -182,6 +181,10 @@ void nextConfig(char *rna, struct stateConfig * config, int *bpsa){
 	float E1,prob,flux;
 	double z,timeInc,cumSum;
 	
+	int  *tmpbpsa,*tmpbps,tmpma,tmpmr;
+	tmpbpsa = (int *) xcalloc(2*n*(n-1)/2+1,sizeof(int));
+	tmpbps = (int *) xcalloc(n+1,sizeof(int));
+	
 	double *Pa = (double *) xcalloc(4*n*(n-1)/2+1,sizeof(float));
 	double *Pr = (double *) xcalloc(4*n+1,sizeof(float));
 	
@@ -196,7 +199,6 @@ void nextConfig(char *rna, struct stateConfig * config, int *bpsa){
 		Pa[4*k+2] = -1  
 	 Pr is prob of removing base pair (i,j), where format is identical to Pa. 
 	-------------------------------------------------------*/
-	
 	tmp = (char *) xcalloc(n+1,sizeof(char)); //temporary secondary structure
 	/* Copy the list of base pairs in bps into tmp. Note config->secStr[n]='\0'.*/
 	for (i=0;i<=n;i++)    
@@ -208,10 +210,49 @@ void nextConfig(char *rna, struct stateConfig * config, int *bpsa){
 		tmp[i] = '('; tmp[j] = ')';
 		E1 = energy_of_struct(rna,tmp);
 		if (DEBUG) printf("add base pair (%d,%u), MFE after adding:%lf\n",i,j,E1);
-		if (!strcmp(method,"emc"))
-			prob      = 1.0/(ma+mr) * MIN(1,exp(-(E1-E0)/RT));
-		else if (!strcmp(method,"gil")) //flux, not prob
-			prob      = MIN(1,exp(-(E1-E0)/RT));
+
+		if (!strcmp(method,"emc")){
+			if (hasting==0){
+				prob      = 1.0/(ma+mr) * MIN(1,exp(-(E1-E0)/RT));
+			}
+			else{
+				k=0;
+				while (config->bps[2*k]!=-1) {
+					tmpbps[2*k] = config->bps[2*k];
+					tmpbps[2*k+1] = config->bps[2*k+1];
+					k++;
+				}
+				tmpbps[2*k] = config->bps[2*k];
+				tmpbps[2*k+1] = config->bps[2*k+1];
+				tmpbps[2*mr]=i; tmpbps[2*mr+1]=j; 
+				tmpbps[2*(mr+1)]=-1; tmpbps[2*(mr+1)+1]=-1; //place new marker for end of base pairs
+				listOfNextStatesByAddingCompatibleBasePair(rna,tmp,tmpbps, &tmpbpsa);
+				tmpma = length(tmpbpsa);
+				tmpmr = mr +1;
+				prob = 1.0/(ma+mr) * MIN(1,exp(-((E1-E0)/RT)*((ma+mr)/(tmpma+tmpmr))));
+			}
+		}
+		else if (!strcmp(method,"gil")){ //flux, not prob
+			if (hasting==0){
+				prob      = MIN(1,exp(-(E1-E0)/RT));
+			}
+			else{
+				k=0;
+				while (config->bps[2*k]!=-1) {
+					tmpbps[2*k] = config->bps[2*k];
+					tmpbps[2*k+1] = config->bps[2*k+1];
+					k++;
+				}
+				tmpbps[2*k] = config->bps[2*k];
+				tmpbps[2*k+1] = config->bps[2*k+1];
+				tmpbps[2*mr]=i; tmpbps[2*mr+1]=j; 
+				tmpbps[2*(mr+1)]=-1; tmpbps[2*(mr+1)+1]=-1; //place new marker for end of base pairs
+				listOfNextStatesByAddingCompatibleBasePair(rna,tmp,tmpbps, &tmpbpsa);
+				tmpma = length(tmpbpsa);
+				tmpmr = mr +1;
+				prob = MIN(1,exp(-((E1-E0)/RT)*((ma+mr)/(tmpma+tmpmr))));
+			}
+		}
 		else{
 			printf("error in method name\n");
 			exit(1);
@@ -229,11 +270,82 @@ void nextConfig(char *rna, struct stateConfig * config, int *bpsa){
 		i = config->bps[2*x]; j = config->bps[2*x+1];
 		tmp[i] = '.'; tmp[j] = '.';
 		E1 = energy_of_struct(rna,tmp);
-		if (DEBUG) printf("remove base pair (%d,%u), MFE after removing:%lf\n",i,j,E1);
-		if (!strcmp(method,"emc"))
-			prob      = 1.0/(ma+mr) * MIN(1,exp(-(E1-E0)/RT));
-		else if (!strcmp(method,"gil"))//flux used instead of prob
+		if (DEBUG) printf("remove base pair (%d,%d), MFE after removing:%lf\n",i,j,E1);
+		if (!strcmp(method,"emc")){
+			if(hasting==0){
+				prob      = 1.0/(ma+mr) * MIN(1,exp(-(E1-E0)/RT));
+			}
+			else{
+				k = 0;
+				while (config->bps[2*k]!=-1) {
+					tmpbps[2*k] = config->bps[2*k];
+					tmpbps[2*k+1] = config->bps[2*k+1];
+					k++;
+				}
+				tmpbps[2*k] = config->bps[2*k];
+				tmpbps[2*k+1] = config->bps[2*k+1];			
+				/* Find position k of (i,j) in list, delete config->bps[2*k]=i and config->bps[2*k+1]=j
+				by moving down all entries in bps. */
+				k = 0;
+				while (tmpbps[2*k]!=-1) {
+					if (tmpbps[2*k]==i && tmpbps[2*k+1]==j)
+					break;
+					k++;
+				}
+				//move up entries in bps. Only do this when update secStr
+				if (tmpbps[2*k]!=-1) {
+					l = k + 1;
+					while (tmpbps[2*l]!=-1) {
+						tmpbps[2*(l-1)] = tmpbps[2*l];
+						tmpbps[2*(l-1)+1] = tmpbps[2*l+1];
+						l++;
+					}
+					tmpbps[2*(l-1)]=-1;
+				}
+				listOfNextStatesByAddingCompatibleBasePair(rna,tmp,tmpbps, &tmpbpsa);
+				tmpma = length(tmpbpsa);
+				tmpmr = mr - 1;
+				prob = 1.0/(ma+mr) * MIN(1,exp(-((E1-E0)/RT)*((ma+mr)/(tmpma+tmpmr))));
+			}
+		}
+		else if (!strcmp(method,"gil")){//flux used instead of prob
+			if(hasting==0){
 			prob      = MIN(1,exp(-(E1-E0)/RT));
+			}
+			else{
+				k = 0;
+				while (config->bps[2*k]!=-1) {
+					tmpbps[2*k] = config->bps[2*k];
+					tmpbps[2*k+1] = config->bps[2*k+1];
+					k++;
+				}
+				tmpbps[2*k] = config->bps[2*k];
+				tmpbps[2*k+1] = config->bps[2*k+1];			
+				/* Find position k of (i,j) in list, delete config->bps[2*k]=i and config->bps[2*k+1]=j
+				by moving down all entries in bps. */
+				k = 0;
+				while (tmpbps[2*k]!=-1) {
+					if (tmpbps[2*k]==i && tmpbps[2*k+1]==j)
+					break;
+					k++;
+				}
+				//move up entries in bps. Only do this when update secStr
+				if (tmpbps[2*k]!=-1) {
+					l = k + 1;
+					while (tmpbps[2*l]!=-1) {
+						tmpbps[2*(l-1)] = tmpbps[2*l];
+						tmpbps[2*(l-1)+1] = tmpbps[2*l+1];
+						l++;
+					}
+					tmpbps[2*(l-1)]=-1;
+				}
+				listOfNextStatesByAddingCompatibleBasePair(rna,tmp,tmpbps, &tmpbpsa);
+				tmpma = length(tmpbpsa);
+				tmpmr = mr - 1;
+				prob = MIN(1,exp(-((E1-E0)/RT)*((ma+mr)/(tmpma+tmpmr))));
+			}
+			
+		}
 		else{
 			printf("error in method name\n");
 			exit(1);
@@ -311,6 +423,7 @@ void nextConfig(char *rna, struct stateConfig * config, int *bpsa){
 		printSecStrListAsString(rna);
 		printSecStrListAsString(config->secStr);
 		printf("MFE:%lf\n",config->MFE);	
+		printBasePairList(config->bps,sizeof(config->bps));
 	}
 	free(tmp); free(Pa); free(Pr);
 	//inline function for  -1.0/flux*log(drand48());
@@ -368,7 +481,7 @@ struct stateConfig monteCarlo(char *rna) {
 int run(char *rna, int NUMRUNS) {
 	struct timeval t;
 	int n, i, folded;
-	int firstPassageTimeList[NUMRUNS];
+	double firstPassageTimeList[NUMRUNS];
 	double logfirstPassageTimeList[NUMRUNS];
 	struct stateConfig mcout;
 	double mean0,stdev0,max0,min0;
@@ -396,6 +509,7 @@ int run(char *rna, int NUMRUNS) {
 	for (i=0;i<NUMRUNS;i++) {
 		printf("# trajectory %d\n",i+1);
 		mcout = monteCarlo(rna);
+		printf("Time:%g\n",mcout.time);
 		firstPassageTimeList[i] = mcout.time;
 		folded                  = mcout.folded; //if MFE str found
 		if (verbose)
@@ -509,6 +623,9 @@ int main(int argc, char *argv[]) {
 						}break;
 					case 'g': //GO model
 						GO = 1;
+						break;
+					case 'a'://Hasting's trick
+						hasting=1;
 						break;
 					case 'v': //print trajectory
 						verbose = 1;

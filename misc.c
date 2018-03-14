@@ -61,7 +61,7 @@ void printSecStrListAsString(char *secStr){
 void printBasePairList(int *bps, int len){
   /* Print the secondary structure as a string */
   int i;
-  for (i=0;i<len;i++) printf("(%u,%u) ",bps[2*i],bps[2*i+1]);
+  for (i=0;i<len;i++) printf("(%d,%d) ",bps[2*i],bps[2*i+1]);
   printf("\n");
 }
 
@@ -186,30 +186,33 @@ char *getInputRNA( char *fileName){
 
 /* Useful functions for statistics */
 
-int max(int *l, int n) {
-  int m = 0, i;
+double max(double *l, int n) {
+  int i;
+  double m = 0;
   for (i=0;i<n;i++)
     if (m<l[i])
       m = l[i];
   return m;
 }
 
-int min(int *l, int n) {
-  int m = INF, i;
+double min(double *l, int n) {
+  double m = INF;
+  int i;
   for (i=0;i<n;i++)
     if (m>l[i])
       m = l[i];
   return m;
 }
 
-double mean(int *l, int n) {
-  int s = 0, i;
+double mean(double *l, int n) {
+  double s = 0;
+  int i;
   for (i=0;i<n;i++)
     s += l[i];
   return ((double) s)/n;
 }
 
-double std(int *l, int n) {
+double std(double *l, int n) {
   double s = 0.0;
   int i;
   double m = mean(l,n);
