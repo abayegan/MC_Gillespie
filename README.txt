@@ -1,4 +1,4 @@
-Amir Bayegan, Peter Clote -- Boston Colleg
+Amir Bayegan, Peter Clote -- Boston College
 ************************************************************************
 This program simulates kinetics of folding with event-driven Monter Carlo or Gillespie algorithms. The available options are as follows:
 ************************************************************************
