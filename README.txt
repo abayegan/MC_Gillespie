@@ -1,6 +1,6 @@
 Amir Bayegan, Peter Clote -- Boston College
 ************************************************************************
-This program simulates kinetics of folding with event-driven Monter Carlo or Gillespie algorithms. The available options are as follows:
+This program simulates kinetics of folding with event-driven Monte Carlo or Gillespie algorithms. The available options are as follows:
 ************************************************************************
 USAGE: ./mc [-s sequence]|[-f FastaFile] [-m method] [-y random seed] [-r number of runs] [-l trajectory length] [-d 0|1|2] [-t temperature(c)] [-e 99|04] [-o output file prefix ] [-v]
 try ./mc -h for help
